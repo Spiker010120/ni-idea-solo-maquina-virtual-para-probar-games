@@ -5,50 +5,98 @@ on:
 
 jobs:
   gpu-rdp:
-    # Reemplaza "TU-LABEL-GPU" por la etiqueta exacta
-    # que tenga tu larger runner con Tesla T4.
     runs-on:
-      labels: TU-LABEL-GPU
+      labels: gpu-t4
 
-    timeout-minutes: 3600
+    timeout-minutes: 360
 
     steps:
 
-      - name: Check GPU
+      - name: Check NVIDIA GPU
         shell: bash
         run: |
-          echo "=== GPU ==="
-          nvidia-smi || true
+          echo "======================================"
+          echo "       GPU INFORMATION"
+          echo "======================================"
 
+          if command -v nvidia-smi >/dev/null 2>&1; then
+            nvidia-smi
+          else
+            echo "nvidia-smi no esta disponible"
+            exit 1
+          fi
+
+      - name: Check GPU Memory
+        shell: bash
+        run: |
+          echo ""
+          echo "=== GPU ==="
+
+          nvidia-smi \
+            --query-gpu=name,memory.total,memory.used,memory.free,driver_version \
+            --format=csv
+
+      - name: Check CPU and RAM
+        shell: bash
+        run: |
           echo ""
           echo "=== CPU ==="
-          lscpu | head -20
+          lscpu | grep -E "Model name|CPU\(s\)"
 
           echo ""
           echo "=== RAM ==="
           free -h
 
-      - name: Install NVIDIA tools
+      - name: Check CUDA
         shell: bash
         run: |
-          nvidia-smi || true
+          echo ""
+          echo "=== CUDA / NVIDIA ==="
 
-      - name: Test CUDA
-        shell: bash
-        run: |
-          echo "Checking NVIDIA GPU..."
           nvidia-smi
 
-          echo ""
-          echo "CUDA information:"
-          nvidia-smi --query-gpu=name,memory.total,driver_version \
-            --format=csv
-
-      - name: Keep runner alive
+      - name: Install basic graphics tools
         shell: bash
         run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-utils
+
+      - name: Test OpenGL
+        shell: bash
+        run: |
+          echo ""
+          echo "=== OpenGL ==="
+
+          if command -v glxinfo >/dev/null 2>&1; then
+            glxinfo -B || true
+          else
+            echo "glxinfo no disponible"
+          fi
+
+      - name: Show final GPU status
+        shell: bash
+        run: |
+          echo ""
+          echo "======================================"
+          echo "           FINAL GPU STATUS"
+          echo "======================================"
+
+          nvidia-smi
+
+      - name: Keep GPU runner alive
+        shell: bash
+        run: |
+          echo ""
+          echo "======================================"
+          echo "       GPU RUNNER ACTIVO"
+          echo "======================================"
+
           while true; do
-            echo "[$(date)] GPU runner active"
-            nvidia-smi
+            echo ""
+            echo "[$(date)] GPU activa"
+            nvidia-smi \
+              --query-gpu=name,memory.total,memory.used,memory.free \
+              --format=csv
+
             sleep 300
           done
