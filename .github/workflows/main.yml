@@ -5,8 +5,7 @@ on:
 
 jobs:
   gpu-rdp:
-    runs-on:
-      labels: gpu-t4
+    runs-on: ubuntu-latest
 
     timeout-minutes: 360
 
