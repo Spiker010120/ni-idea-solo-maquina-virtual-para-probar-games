@@ -1,6 +1,3 @@
-# Ubuntu Linux + XFCE + XRDP + Tailscale
-
-```yaml
 name: Linux RDP
 
 on:
@@ -12,21 +9,12 @@ jobs:
     timeout-minutes: 360
 
     steps:
-
-      # ============================================================
-      # ACTUALIZAR UBUNTU E INSTALAR ESCRITORIO
-      # ============================================================
       - name: Install Linux Desktop
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo " INSTALANDO XFCE + XRDP"
-          echo "======================================"
-
           sudo apt-get update
-
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xfce4 \
             xfce4-goodies \
@@ -37,136 +25,79 @@ jobs:
             wget \
             git \
             unzip \
+            tar \
             net-tools \
-            ca-certificates
+            ca-certificates \
+            python3 \
+            pciutils
 
-          # Configurar XFCE para xrdp
           echo "startxfce4" | sudo tee /etc/skel/.xsession > /dev/null
 
-          # Crear la sesión XFCE de xrdp
           sudo bash -c 'cat > /etc/xrdp/startwm.sh << "EOF"'
           #!/bin/sh
           export LANG=C.UTF-8
           export LANGUAGE=C.UTF-8
           export LC_ALL=C.UTF-8
-
           unset DBUS_SESSION_BUS_ADDRESS
           unset XDG_RUNTIME_DIR
-
           startxfce4
           EOF
 
           sudo chmod +x /etc/xrdp/startwm.sh
-
-          # Añadir xrdp al grupo ssl-cert
           sudo adduser xrdp ssl-cert || true
 
-          echo "XFCE y XRDP instalados."
-
-      # ============================================================
-      # CREAR USUARIO RDP
-      # ============================================================
       - name: Create RDP User
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo " CREANDO USUARIO RDP"
-          echo "======================================"
-
-          # Generar contraseña aleatoria
           PASSWORD=$(python3 - <<'PY'
           import secrets
           import string
-
           chars = string.ascii_letters + string.digits + "!@#$%^&*"
           print("".join(secrets.choice(chars) for _ in range(20)))
           PY
           )
 
-          # Crear usuario si no existe
           if ! id RDP >/dev/null 2>&1; then
-              sudo useradd -m -s /bin/bash RDP
+            sudo useradd -m -s /bin/bash RDP
           fi
 
-          # Configurar contraseña
           echo "RDP:$PASSWORD" | sudo chpasswd
-
-          # Permitir escritorio remoto
           sudo usermod -aG ssl-cert RDP || true
-
-          # Configurar XFCE
           sudo -u RDP bash -c 'echo "startxfce4" > ~/.xsession'
           sudo chown RDP:RDP /home/RDP/.xsession
-          sudo chmod 644 /home/RDP/.xsession
 
-          # Guardar credenciales en variables de GitHub
           echo "RDP_USER=RDP" >> "$GITHUB_ENV"
           echo "RDP_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
 
-          echo "Usuario RDP creado correctamente."
-
-      # ============================================================
-      # CONFIGURAR XRDP
-      # ============================================================
       - name: Configure XRDP
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo " CONFIGURANDO XRDP"
-          echo "======================================"
-
           sudo sed -i 's/^port=.*/port=3389/' /etc/xrdp/xrdp.ini
-
-          # Reiniciar XRDP
           sudo systemctl enable xrdp
           sudo systemctl restart xrdp
 
           sleep 5
-
-          echo ""
-          echo "=== ESTADO DE XRDP ==="
           sudo systemctl --no-pager --full status xrdp || true
 
-      # ============================================================
-      # CONFIGURAR FIREWALL
-      # ============================================================
       - name: Configure Firewall
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo " CONFIGURANDO FIREWALL"
-          echo "======================================"
-
           sudo apt-get install -y ufw
-
-          # Permitir SSH por seguridad
           sudo ufw allow 22/tcp || true
-
-          # Permitir RDP
           sudo ufw allow 3389/tcp || true
-
-          # Activar firewall
           sudo ufw --force enable
-
           sudo ufw status
 
-      # ============================================================
-      # INSTALAR TAILSCALE
-      # ============================================================
       - name: Install Tailscale
         shell: bash
         run: |
           set -e
-
-          echo "======================================"
-          echo " INSTALANDO TAILSCALE"
-          echo "======================================"
 
           curl -fsSL https://tailscale.com/install.sh | sh
 
@@ -174,22 +105,14 @@ jobs:
           sudo systemctl start tailscaled
 
           sleep 5
-
           tailscale version
 
-      # ============================================================
-      # CONECTAR TAILSCALE
-      # ============================================================
       - name: Establish Tailscale Connection
         shell: bash
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
           set -e
-
-          echo "======================================"
-          echo " CONECTANDO TAILSCALE"
-          echo "======================================"
 
           if [ -z "$TAILSCALE_AUTH_KEY" ]; then
             echo "ERROR: Falta TAILSCALE_AUTH_KEY"
@@ -200,12 +123,9 @@ jobs:
             --authkey="$TAILSCALE_AUTH_KEY" \
             --hostname="gh-linux-$GITHUB_RUN_ID"
 
-          echo "Esperando IP de Tailscale..."
-
           TS_IP=""
 
           for i in {1..20}; do
-
             TS_IP=$(tailscale ip -4 2>/dev/null || true)
 
             if [ -n "$TS_IP" ]; then
@@ -222,26 +142,10 @@ jobs:
 
           echo "TAILSCALE_IP=$TS_IP" >> "$GITHUB_ENV"
 
-          echo ""
-          echo "Tailscale conectado."
-          echo "IP: $TS_IP"
-
-      # ============================================================
-      # COMPROBAR PUERTO RDP
-      # ============================================================
       - name: Verify RDP
         shell: bash
         run: |
-          echo "======================================"
-          echo " COMPROBANDO RDP"
-          echo "======================================"
-
           sleep 5
-
-          echo ""
-          echo "=== PUERTO 3389 ==="
-
-          sudo ss -tulpn | grep 3389 || true
 
           if sudo ss -lnt | grep -q ':3389'; then
             echo "Puerto 3389 esta abierto."
@@ -250,13 +154,8 @@ jobs:
             exit 1
           fi
 
-          echo ""
-          echo "=== TAILSCALE ==="
           tailscale status
 
-      # ============================================================
-      # MOSTRAR INFORMACION DE ACCESO
-      # ============================================================
       - name: Show RDP Information
         shell: bash
         run: |
@@ -265,32 +164,19 @@ jobs:
           echo "          LINUX RDP ACCESS"
           echo "======================================"
           echo ""
-          echo "Sistema : Ubuntu"
-          echo "Escritorio: XFCE"
-          echo "Protocolo: XRDP"
-          echo ""
-          echo "Address : $TAILSCALE_IP"
-          echo "Port    : 3389"
-          echo "Username: $RDP_USER"
-          echo "Password: $RDP_PASSWORD"
+          echo "Sistema    : Ubuntu"
+          echo "Escritorio : XFCE"
+          echo "Protocolo  : XRDP"
+          echo "Address    : $TAILSCALE_IP"
+          echo "Port       : 3389"
+          echo "Username   : $RDP_USER"
+          echo "Password   : $RDP_PASSWORD"
           echo ""
           echo "======================================"
-          echo "      CONECTATE POR ESCRITORIO REMOTO"
-          echo "======================================"
-          echo ""
 
-      # ============================================================
-      # INFORMACION DE LA MAQUINA
-      # ============================================================
       - name: Show System Information
         shell: bash
         run: |
-          echo ""
-          echo "======================================"
-          echo "       INFORMACION DEL SISTEMA"
-          echo "======================================"
-
-          echo ""
           echo "=== CPU ==="
           lscpu | grep -E 'Model name|CPU\(s\)' | head -5
 
@@ -310,35 +196,13 @@ jobs:
           echo "=== KERNEL ==="
           uname -a
 
-      # ============================================================
-      # MANTENER LA MAQUINA ACTIVA
-      # ============================================================
       - name: Maintain Connection
         shell: bash
         run: |
-          echo ""
-          echo "======================================"
-          echo "        LINUX RDP ACTIVO"
-          echo "======================================"
-
           while true; do
-
-            echo ""
             echo "[$(date)] RDP activo"
             echo "Tailscale IP: $TAILSCALE_IP"
-
-            echo ""
-            echo "Usuarios conectados:"
-            who || true
-
-            echo ""
-            echo "Uso de memoria:"
             free -h
-
-            echo ""
-            echo "Espacio en disco:"
             df -h /
-
             sleep 300
           done
-```
